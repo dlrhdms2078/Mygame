@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Forest Jump: Select Edition</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #87CEEB; font-family: 'Apple SD Gothic Neo', sans-serif; touch-action: none; user-select: none; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #333; font-size: 20px; font-weight: bold; pointer-events: none; }
+        #msg, #charSelect { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255, 255, 255, 0.95); padding: 30px; border-radius: 25px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.2); width: 85%; max-width: 350px; z-index: 10; }
+        .char-grid { display: flex; justify-content: space-around; margin: 20px 0; }
+        .char-opt { cursor: pointer; padding: 10px; border-radius: 15px; border: 3px solid transparent; transition: 0.2s; }
+        .char-opt:active { transform: scale(0.9); }
+        .char-opt.selected { border-color: #4CAF50; background: #e8f5e9; }
+        .char-icon { width: 50px; height: 50px; border-radius: 50%; margin: 0 auto 5px; }
+        h1 { color: #2E7D32; margin: 0 0 10px; font-size: 24px; }
+        button { background: #4CAF50; color: white; border: none; padding: 12px 30px; font-size: 18px; font-weight: bold; border-radius: 50px; cursor: pointer; box-shadow: 0 4px 0 #1B5E20; }
+        #levelUp { position: absolute; top: 20%; left: 50%; transform: translateX(-50%); color: #FF5722; font-size: 30px; font-weight: bold; display: none; text-shadow: 2px 2px #fff; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">Score: <span id="scoreVal">0</span> | Level: <span id="levelVal">1</span></div>
+    <div id="levelUp">LEVEL UP!</div>
+
+    <div id="charSelect">
+        <h1>캐릭터를 선택하세요!</h1>
+        <div class="char-grid">
+            <div class="char-opt" onclick="selectChar('#FFEB3B', '🐥')">
+                <div class="char-icon" style="background:#FFEB3B"></div>
+                <span>병아리</span>
+            </div>
+            <div class="char-opt" onclick="selectChar('#F48FB1', '🐰')">
+                <div class="char-icon" style="background:#F48FB1"></div>
+                <span>토끼</span>
+            </div>
+            <div class="char-opt" onclick="selectChar('#80CBC4', '🦖')">
+                <div class="char-icon" style="background:#80CBC4"></div>
+                <span>공룡</span>
+            </div>
+        </div>
+        <p style="font-size:13px; color:#666;">터치하여 캐릭터 선택 후 시작</p>
+    </div>
+
+    <div id="msg" style="display:none;">
+        <h1 id="resTitle">Game Over</h1>
+        <p id="resDesc"></p>
+        <button onclick="location.reload()">다시 하기</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('scoreVal');
+        const levelDisplay = document.getElementById('levelVal');
+        const levelUpTxt = document.getElementById('levelUp');
+
+        let gameState = 'select';
+        let score = 0;
+        let level = 1;
+        let baseSpeed = 5;
+        let currentSpeed = 5;
+        let groundY, animationId;
+        
+        const player = { x: 60, y: 0, r: 20, dy: 0, jForce: 12, grav: 0.6, jCount: 0, color: '#FFEB3B' };
+        let enemies = []; // 바위와 새 통합 관리
+        let items = [];
+        let frame = 0;
+        let boosterActive = false;
+        let boosterTime = 0;
+
+        function init() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            groundY = canvas.height - 80;
+            player.y = groundY - player.r;
+        }
+        window.addEventListener('resize', init);
+        init();
+
+        function selectChar(color, emoji) {
+            player.color = color;
+            document.getElementById('charSelect').style.display = 'none';
+            startGame();
+        }
+
+        function startGame() {
+            gameState = 'play';
+            score = 0;
+            level = 1;
+            baseSpeed = 5;
+            currentSpeed = 5;
+            enemies = [];
+            items = [];
+            update();
+        }
+
+        function handleJump(e) {
+            if(e) e.preventDefault();
+            if(gameState === 'play' && player.jCount < 2) {
+                player.dy = -player.jForce;
+                player.jCount++;
+            }
+        }
+        window.addEventListener('touchstart', handleJump, {passive:false});
+        window.addEventListener('mousedown', handleJump);
+
+        function spawnEnemy() {
+            const isBird = Math.random() > 0.6; // 40% 확률로 새 등장
+            if(isBird) {
+                enemies.push({ x: canvas.width + 50, y: groundY - 70 - Math.random()*60, w: 40, h: 25, type: 'bird' });
+            } else {
+                enemies.push({ x: canvas.width + 50, y: groundY - 30, w: 35, h: 30, type: 'rock' });
+            }
+        }
+
+        function update() {
+            if(gameState !== 'play') return;
+            frame++;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 배경 그리기
+            ctx.fillStyle = "#8BC34A";
+            ctx.fillRect(0, groundY, canvas.width, 80);
+
+            // 아이템 처리
+            if(frame % 500 === 0) items.push({ x: canvas.width + 50, y: groundY - 100, r: 15, hue: 0 });
+            items.forEach((item, i) => {
+                item.x -= currentSpeed;
+                item.hue += 5;
+                ctx.fillStyle = `hsl(${item.hue}, 80%, 60%)`;
+                ctx.beginPath(); ctx.arc(item.x, item.y, item.r, 0, Math.PI*2); ctx.fill();
+                if(Math.hypot(player.x - item.x, player.y - item.y) < player.r + item.r) {
+                    items.splice(i, 1);
+                    activateBooster();
+                }
+            });
+
+            // 장애물 처리
+            const spawnRate = Math.max(40, 100 - (level * 5)); 
+            if(frame % spawnRate === 0) spawnEnemy();
+
+            enemies.forEach((en, i) => {
+                en.x -= currentSpeed;
+                
+                if(en.type === 'rock') {
+                    ctx.fillStyle = "#795548";
+                    ctx.beginPath(); ctx.moveTo(en.x, en.y+en.h); ctx.lineTo(en.x+en.w/2, en.y); ctx.lineTo(en.x+en.w, en.y+en.h); ctx.fill();
+                } else {
+                    // 새 그리기
+                    ctx.fillStyle = "#E91E63";
+                    ctx.beginPath(); ctx.ellipse(en.x + en.w/2, en.y + en.h/2, en.w/2, en.h/2, 0, 0, Math.PI*2); ctx.fill();
+                    // 날개짓 표현
+                    ctx.fillStyle = "white";
+                    const wing = Math.sin(frame*0.2) * 10;
+                    ctx.beginPath(); ctx.moveTo(en.x+10, en.y+10); ctx.lineTo(en.x+20, en.y+wing); ctx.lineTo(en.x+30, en.y+10); ctx.fill();
+                }
+
+                // 충돌 판정
+                if(!boosterActive) {
+                    if(player.x+player.r-5 > en.x && player.x-player.r+5 < en.x+en.w && player.y+player.r-5 > en.y && player.y-player.r+5 < en.y+en.h) {
+                        gameOver();
+                    }
+                }
+
+                if(en.x + en.w < 0) {
+                    enemies.splice(i, 1);
+                    score += 10;
+                    scoreDisplay.innerText = score;
+                    // 난이도 상승 체크
+                    if(score > 0 && score % 100 === 0 && level < score/100 + 1) {
+                        levelUp();
+                    }
+                }
+            });
+
+            // 플레이어
+            player.dy += player.grav;
+            player.y += player.dy;
+            if(player.y > groundY - player.r) { player.y = groundY - player.r; player.dy = 0; player.jCount = 0; }
+
+            ctx.save();
+            if(boosterActive) {
+                ctx.shadowBlur = 20; ctx.shadowColor = "white";
+                boosterTime -= 1/60;
+                if(boosterTime <= 0) { boosterActive = false; currentSpeed = baseSpeed; }
+            }
+            ctx.fillStyle = player.color;
+            ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, Math.PI*2); ctx.fill();
+            // 눈
+            ctx.fillStyle = "black"; ctx.beginPath(); ctx.arc(player.x+10, player.y-5, 3, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+
+            animationId = requestAnimationFrame(update);
+        }
+
+        function activateBooster() {
+            boosterActive = true;
+            boosterTime = 5;
+            currentSpeed = baseSpeed * 1.8;
+        }
+
+        function levelUp() {
+            level++;
+            baseSpeed += 1;
+            if(!boosterActive) currentSpeed = baseSpeed;
+            levelDisplay.innerText = level;
+            levelUpTxt.style.display = 'block';
+            setTimeout(() => { levelUpTxt.style.display = 'none'; }, 1500);
+        }
+
+        function gameOver() {
+            gameState = 'over';
+            cancelAnimationFrame(animationId);
+            document.getElementById('msg').style.display = 'block';
+            document.getElementById('resDesc').innerHTML = `Score: ${score} | Level: ${level}`;
+        }
+    </script>
+</body>
+</html>
